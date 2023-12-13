@@ -1,43 +1,42 @@
-from aiohttp import web
-import socketio
 from fastai.data.all import *
 from fastai.basics import *
 import numpy as np
+from tsai.all import *
+import pathlib
+from klein import run, route
+import json
 
+def resize(data):
+    new_idx = np.linspace(0,data.index[-1],301)
+    stretchedData = data.reindex(new_idx,method='ffill', limit=1).iloc[1:].interpolate()
+    return stretchedData
+
+def get_x_ts(x):
+  val = resize(pd.DataFrame(x)).values
+  #val = (val - val.min(0))/(val.max(0) - val.min(0))
+  return val
+
+temp = pathlib.PosixPath
+pathlib.PosixPath = pathlib.WindowsPath
 model = load_learner("model.pkl")
+pathlib.PosixPath = temp
 
-sio = socketio.AsyncServer()
-## Creates a new Aiohttp Web Application
-app = web.Application()
-# Binds our Socket.IO server to our Web App
-## instance
-sio.attach(app)
+pos_arr = np.empty((300,9))
+sz = 0
+inf_time = time.time()
 
-## we can define aiohttp endpoints just as we normally
-## would with no change
-async def index(request):
-    with open('index.html') as f:
-        return web.Response(text=f.read(), content_type='text/html')
+def detect_movement(data):
+    res = model.predict(get_x_ts(data))
+    print(res)
+    return res
 
-## If we wanted to create a new websocket endpoint,
-## use this decorator, passing in the name of the
-## event we wish to listen out for
-@sio.on('loc_update')
-def print_message(sid, message):
-    ## When we receive a new event of type
-    ## 'message' through a socket.io connection
-    ## we print the socket ID and the message
-    print("Socket ID: " , sid)
-    print(message)
 
-@sio.event
-def connect(sid, environ, auth):
-    print('connect ', sid)
+@route('/',methods=["POST"])
+def home(request):
+    content = json.loads(request.content.read())    
+    arr = np.asarray(content,dtype=float).round(8)
 
-## We bind our aiohttp endpoint to our app
-## router
-app.router.add_get('/', index)
+    res = detect_movement(arr)
+    return json.dumps({"result": res[0]})
 
-## We kick off our server
-if __name__ == '__main__':
-    web.run_app(app,port=3000)
+run("localhost", 3000)
